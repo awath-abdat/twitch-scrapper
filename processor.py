@@ -1,5 +1,4 @@
 import os
-import time
 import boto3
 from pymongo import MongoClient
 from kafka import KafkaConsumer
@@ -11,21 +10,23 @@ collection = db["chat_messages"]
 
 
 def process_messages():
-    message_count = 0
-    time_window_start = time.time()
-
     for message in consumer:
-        message_count += 1
-        if time.time() - time_window_start >= 60:  # 1 minute window
+        # insert message to the database
+        collection.insert_one(message)
 
-            # insert message to the database
-            collection.insert_one(message)
+        broadcaster_user_id = message.get("broadcaster_user_id", None)
+        message_count = (
+            collection.count_documents({"broadcaster_user_id": broadcaster_user_id})
+            if broadcaster_user_id
+            else 0
+        )
 
-            # check message threshold
-            if message_count > int(os.getenv("CHAT_MESSAGE_THRESHOLD", 1000)):
-                send_alert(message_count)
-            message_count = 0
-            time_window_start = time.time()
+        # check message threshold
+        if message_count and message_count > int(
+            os.getenv("CHAT_MESSAGE_THRESHOLD", 1000)
+        ):
+            send_alert(message_count)
+        message_count = 0
 
 
 def send_alert(count):
@@ -37,4 +38,7 @@ def send_alert(count):
         Subject="Twitch Chat Alert",
     )
 
-    print(f"Alert: High chat volume detected! Messages in the last minute: {count}")
+
+if __name__ == "main":
+    while True:
+        process_messages()
